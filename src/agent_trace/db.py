@@ -2,11 +2,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from agent_trace.config import settings
 
-engine = create_async_engine(settings.database_url, echo=False)
+# trace schema: search_path via server_settings
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    connect_args={"server_settings": {"search_path": "trace,public"}},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-# Separate engine for auth DB (agent_tools)
-auth_engine = create_async_engine(settings.auth_database_url, echo=False)
+# auth engine: connects to tools schema for shared API key validation
+auth_engine = create_async_engine(
+    settings.auth_database_url,
+    echo=False,
+    connect_args={"server_settings": {"search_path": "tools,public"}},
+)
 auth_session = async_sessionmaker(auth_engine, class_=AsyncSession, expire_on_commit=False)
 
 
