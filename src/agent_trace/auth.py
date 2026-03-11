@@ -1,5 +1,6 @@
 import uuid
 
+import bcrypt
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
@@ -12,7 +13,7 @@ security = HTTPBearer()
 async def get_project_id(
     credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> uuid.UUID:
-    """Validate an at_ prefixed API key against agent_tools.apiKeys table.
+    """Validate an at_-prefixed API key against tools.api_keys + tools.projects.
 
     Returns the project_id associated with the key.
     """
@@ -20,13 +21,25 @@ async def get_project_id(
     if not token.startswith("at_"):
         raise HTTPException(status_code=401, detail="Invalid API key format")
 
+    prefix = token[:11]  # "at_" + first 8 chars
+
     async with auth_session() as db:
-        # agent_tools stores keys as plaintext with at_ prefix in apiKeys table
         result = await db.execute(
-            text('SELECT "projectId" FROM "apiKeys" WHERE key = :key'),
-            {"key": token},
+            text(
+                """
+                SELECT ak.key_hash, ak.project_id
+                FROM tools.api_keys ak
+                WHERE ak.key_prefix = :prefix
+                  AND ak.revoked_at IS NULL
+                """
+            ),
+            {"prefix": prefix},
         )
-        row = result.fetchone()
-        if row is None:
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        return row[0]
+        rows = result.fetchall()
+
+    for row in rows:
+        key_hash, project_id = row
+        if bcrypt.checkpw(token.encode(), key_hash.encode()):
+            return uuid.UUID(str(project_id))
+
+    raise HTTPException(status_code=401, detail="Invalid API key")
